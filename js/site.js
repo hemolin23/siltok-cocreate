@@ -110,21 +110,162 @@
     calc();
   });
 
-  // ---------- 加入社群：两道题 ----------
-  const join = $("[data-join]");
-  if (join) {
-    let p = "";
-    const go = (pp, w = "") => { track("path_select", { p: pp, state: w }); cp.p = pp; cp.t = Date.now(); localStorage.setItem("stk_cp", JSON.stringify(cp)); location.href = `${BASE}/join/${pp}${STATIC ? "/" : ""}?ch=${encodeURIComponent(cp.ch || "direct")}${w ? "&w=" + w : ""}`; };
-    $$(".q1 .opt", join).forEach((o) => o.addEventListener("click", () => {
-      p = o.dataset.p; $$(".q1 .opt", join).forEach((x) => x.classList.toggle("on", x === o));
-      if (p === "biz") return go(p, "business");
-      $(".q2", join).hidden = false; $(".q2", join).scrollIntoView({ behavior: "smooth", block: "center" });
-    }));
-    $$(".q2 .opt", join).forEach((o) => o.addEventListener("click", () => p && go(p, o.dataset.w)));
-    if (cp.p) {
-      const known = $$(".q1 .opt", join).find((o) => o.dataset.p === cp.p);
-      if (known) { $(".q-skip", join).hidden = false; $("[data-known]", join).textContent = known.querySelector("b").textContent; $("[data-goknown]", join).addEventListener("click", (e) => { e.preventDefault(); go(cp.p); }); }
-    }
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches || !!(navigator.connection && navigator.connection.saveData);
+
+  // ---------- 《黑流树海》图层重拼（时间轴逻辑移植自原作单文件版） ----------
+  // 0 ~ P1 秒播连续视频；之后视频隐藏，21 个图层按时间点在黑底上依次落位；T 秒一循环。
+  const art = $("[data-art]");
+  if (art) {
+    const cfg = JSON.parse(art.dataset.art), T = cfg.T, P1 = cfg.P1;
+    const cam = $(".art-cam", art), v = $(".art-v", art), bar = $("[data-art-bar]", art), pg = $("i", bar);
+    const tcEl = $("[data-art-tc]", art), lyEl = $("[data-art-layer]", art);
+    const playB = $("[data-art-play]", art), sndB = $("[data-art-snd]", art), fxB = $("[data-art-fx]", art);
+    const n = $$(".art-ly", art).length;
+    const L = $$(".art-ly", art).map((el, i) => {
+      const s = el.style, cx = ((parseFloat(s.left) + parseFloat(s.width) / 2 - 50) / 100) * 1280, cy = ((parseFloat(s.top) + parseFloat(s.height) / 2 - 50) / 100) * 720, d = Math.hypot(cx, cy) || 1;
+      return { el, t: cfg.ts[i], dx: cx / d, dy: cy / d, z: 0.2 + i / n };
+    });
+    const ease = (x) => 1 - Math.pow(1 - x, 3), cl = (x) => Math.max(0, Math.min(1, x));
+    let t = 0, playing = !reduce, fx = matchMedia("(pointer: fine)").matches, sound = false, last = performance.now(), mx = 0, my = 0, tmx = 0, tmy = 0, visible = false, ready = false, raf = 0, k = 1, au = null;
+    const fit = () => { k = cam.clientWidth / 1280 || 1; };
+    addEventListener("resize", fit); fit();
+    Promise.all(L.map((o) => (o.el.decode ? o.el.decode() : Promise.resolve()).catch(() => {}))).then(() => { ready = true; });
+    const render = () => {
+      const inP1 = t < P1;
+      v.style.visibility = inP1 ? "visible" : "hidden";
+      if (inP1 && Math.abs(v.currentTime - t) > 0.15) v.currentTime = t;
+      if (inP1 && playing && v.paused) v.play().catch(() => {});
+      if ((!inP1 || !playing) && !v.paused) v.pause();
+      mx += (tmx - mx) * 0.08; my += (tmy - my) * 0.08;
+      cam.style.transform = fx && !inP1 ? `scale(${1 + 0.03 * ease(cl((t - P1) / (T - P1)))})` : "";
+      let shown = 0;
+      L.forEach((o) => {
+        if (t < o.t) { o.el.style.opacity = 0; return; }
+        shown++;
+        if (!fx) { o.el.style.opacity = 1; o.el.style.transform = ""; return; }
+        const p = ease(cl((t - o.t) / 0.45)), off = (1 - p) * 40 * k, px = -mx * o.z * 24 * k, py = -my * o.z * 16 * k;
+        o.el.style.opacity = p;
+        o.el.style.transform = `translate(${(o.dx * off + px).toFixed(1)}px,${(o.dy * off + py).toFixed(1)}px) scale(${(1.04 - 0.04 * p).toFixed(4)})`;
+      });
+      pg.style.width = (t / T) * 100 + "%"; bar.setAttribute("aria-valuenow", Math.round((t / T) * 100));
+      tcEl.textContent = t.toFixed(2).padStart(5, "0"); lyEl.textContent = String(shown).padStart(2, "0");
+    };
+    const syncAudio = () => { if (!au) return; if (sound && playing && visible) { if (Math.abs(au.currentTime - t) > 0.08) au.currentTime = t; if (au.paused) au.play().catch(() => {}); } else au.pause(); };
+    const loop = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (playing) {
+        if (!ready && t < P1 && t + dt >= P1) t = P1 - 0.02; // 图层还没解码好：停在视频最后一帧等
+        else t += dt;
+        if (t >= T) { t -= T; if (au && sound) au.currentTime = t; }
+      }
+      if (au && sound && playing && !au.paused && Math.abs(au.currentTime - t) < 0.3) t = au.currentTime; // 开声音时以音频为准
+      render(); syncAudio();
+      raf = visible && !art.dataset.off ? requestAnimationFrame(loop) : 0;
+    };
+    const wake = () => { if (!raf && visible && !art.dataset.off) { last = performance.now(); raf = requestAnimationFrame(loop); } };
+    art._wake = wake; // 首屏滚走后由钉住滚动暂停 / 恢复
+    new IntersectionObserver((es) => es.forEach((e) => { visible = e.isIntersecting && !document.hidden; if (visible) wake(); else { v.pause(); syncAudio(); } }), { threshold: 0 }).observe(art);
+    document.addEventListener("visibilitychange", () => { if (document.hidden) { visible = false; v.pause(); syncAudio(); } else if (art.getBoundingClientRect().bottom > 0) { visible = true; wake(); } });
+    const setPlay = (on) => { playing = on; art.classList.remove("still"); playB.textContent = on ? "暂停" : "播放"; playB.setAttribute("aria-pressed", on); syncAudio(); wake(); };
+    const setFx = (on) => { fx = on; fxB.textContent = "动效增强：" + (on ? "开" : "关"); fxB.setAttribute("aria-pressed", on); };
+    setFx(fx);
+    if (reduce) { art.classList.add("still"); playB.textContent = "播放"; playB.setAttribute("aria-pressed", false); t = T - 0.01; }
+    playB.addEventListener("click", () => setPlay(!playing));
+    fxB.addEventListener("click", () => setFx(!fx));
+    sndB.addEventListener("click", () => {
+      sound = !sound;
+      if (sound && !au) { au = new Audio(BASE + cfg.audio); au.preload = "auto"; }
+      sndB.textContent = sound ? "静音" : "开声音"; sndB.setAttribute("aria-pressed", sound);
+      if (au) { if (sound) au.currentTime = t; syncAudio(); }
+      if (sound && !playing) setPlay(true);
+    });
+    bar.addEventListener("click", (e) => { const r = bar.getBoundingClientRect(); t = cl((e.clientX - r.left) / r.width) * T * 0.999; if (au && sound) au.currentTime = t; art.classList.remove("still"); render(); });
+    art.addEventListener("keydown", (e) => {
+      if (e.target !== art) return;
+      if (e.code === "Space") { e.preventDefault(); setPlay(!playing); }
+      if (e.code === "ArrowRight" || e.code === "ArrowLeft") {
+        e.preventDefault(); setPlay(false);
+        const ts = [0, P1, ...cfg.ts];
+        t = e.code === "ArrowRight" ? (ts.find((x) => x > t + 0.001) ?? 0) : ([...ts].reverse().find((x) => x < t - 0.001) ?? 0);
+        render();
+      }
+    });
+    const fr = $(".art-frame", art);
+    fr.addEventListener("pointermove", (e) => { const r = fr.getBoundingClientRect(); tmx = (e.clientX - r.left) / r.width - 0.5; tmy = (e.clientY - r.top) / r.height - 0.5; });
+    fr.addEventListener("pointerleave", () => { tmx = tmy = 0; });
+    render();
+  }
+
+  // ---------- 故事版拆层：鼠标悬停合成；触屏点按切换；第一次进入视口自动演示一次 ----------
+  $$("[data-stack]").forEach((st) => {
+    let hover = false, lastType = "mouse";
+    const set = (on) => st.classList.toggle("on", on);
+    st.addEventListener("pointerdown", (e) => { lastType = e.pointerType; });
+    st.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") { hover = true; set(true); } });
+    st.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") { hover = false; set(false); } });
+    st.addEventListener("click", () => { if (lastType !== "mouse") set(!st.classList.contains("on")); });
+    if (!reduce) new IntersectionObserver((es, o) => es.forEach((e) => { if (!e.isIntersecting) return; o.disconnect();
+      setTimeout(() => { if (!hover) set(true); }, 1000); setTimeout(() => { if (!hover) set(false); }, 3400); }), { threshold: 0.5 }).observe(st);
+  });
+
+  // ---------- 创作者档案：6 道题 → 推荐群 + 复制档案 + 飞书表单预填 ----------
+  // 答案只存在本机浏览器（stk_profile）；飞书链接只带画像类答案，称呼、微信号让用户在飞书里自己填。
+  const prof = $("[data-profile]");
+  if (prof) {
+    const pq = $("[data-pq]", prof), pr = $("[data-pr]", prof), Qs = $$(".pq-q", prof);
+    const stepEl = $("[data-pq-step]", prof), pbar = $("[data-pq-bar]", prof), back = $("[data-pq-back]", prof);
+    const nextMap = JSON.parse(prof.dataset.next || "{}");
+    let cur = 0;
+    const show = (i) => { Qs.forEach((q, j) => { q.hidden = j !== i; }); cur = i; stepEl.textContent = i + 1; pbar.style.width = (i / Qs.length) * 100 + "%"; back.hidden = i === 0; };
+    const collect = () => Object.fromEntries(Qs.map((q) => { const on = $$(".pq-opt.on", q); return [q.dataset.q, { field: q.dataset.field, v: on.map((o) => o.dataset.v), x: on.map((o) => o.dataset.x || "") }]; }));
+    const restoreMarks = (data) => Qs.forEach((q) => { const a = data[q.dataset.q]; $$(".pq-opt", q).forEach((o) => o.classList.toggle("on", !!a && a.v.includes(o.dataset.v))); const nb = $("[data-pq-next]", q); if (nb) nb.disabled = !$$(".pq-opt.on", q).length; });
+    const summary = (data) => "【Siltok 创作者档案】\n" + Object.values(data).filter((a) => a.v.length).map((a) => `${a.field}：${a.v.join("、")}`).join("\n");
+    const finish = (data, restored = false) => {
+      const p = (data.role && data.role.x[0]) || "indie", lv = (data.join && data.join.x[0]) || "L0", nx = nextMap[lv] || nextMap.L0 || {};
+      localStorage.setItem("stk_profile", JSON.stringify({ t: Date.now(), data }));
+      cp.p = p; cp.t = Date.now(); localStorage.setItem("stk_cp", JSON.stringify(cp));
+      if (!restored) track("profile_done", { state: `${p}_${lv}` });
+      pq.hidden = true; pr.hidden = false;
+      $("[data-pr-lv]", pr).textContent = `${lv} · ${nx.lv || ""}`;
+      $("[data-pr-t]", pr).textContent = nx.t || ""; $("[data-pr-b]", pr).textContent = nx.b || "";
+      const card = $("[data-pr-card]", pr); card.textContent = "";
+      Object.values(data).forEach((a) => { if (!a.v.length) return; const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = a.field; dd.textContent = a.v.join("、"); card.append(dt, dd); });
+      const form = prof.dataset.form, src = prof.dataset.source || "来源", fa = $("[data-pr-form]", pr), note = $("[data-pr-note]", pr);
+      if (form) {
+        const ps = new URLSearchParams();
+        Object.values(data).forEach((a) => { if (a.v.length) ps.append("prefill_" + a.field, a.v.join(",")); });
+        ps.append("prefill_" + src, "官网-" + (cp.ch || "direct")); ps.append("hide_" + src, "1");
+        fa.href = form + (form.includes("?") ? "&" : "?") + ps.toString(); fa.textContent = "填完整档案 ↗";
+        note.textContent = "会打开飞书表单：你的选择已经帮你填好，只需补称呼、微信号和城市。";
+      } else if (lv === "L4") { fa.href = prof.dataset.biz; fa.textContent = "填写合作报价 ↗"; note.textContent = "会打开飞书合作报价表，商务会跟进。"; }
+      else { fa.href = prof.dataset.beta; fa.textContent = "填写内测申请 ↗"; note.textContent = "会打开飞书内测申请表，按里面的问题填写就行。"; }
+      $("[data-pr-staff]", pr).href = `${BASE}/join/${p}${STATIC ? "/" : ""}?ch=${encodeURIComponent(cp.ch || "direct")}`;
+      if (!restored) pr.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    };
+    Qs.forEach((q, i) => {
+      const many = q.dataset.type === "many", nb = $("[data-pq-next]", q);
+      const advance = () => (i < Qs.length - 1 ? show(i + 1) : finish(collect()));
+      $$(".pq-opt", q).forEach((o) => o.addEventListener("click", () => {
+        if (many) { o.classList.toggle("on"); nb.disabled = !$$(".pq-opt.on", q).length; return; }
+        $$(".pq-opt", q).forEach((x) => x.classList.toggle("on", x === o));
+        setTimeout(advance, 220);
+      }));
+      if (nb) nb.addEventListener("click", advance);
+    });
+    back.addEventListener("click", () => cur > 0 && show(cur - 1));
+    const copyB = $("[data-pr-copy]", pr);
+    copyB.addEventListener("click", () => {
+      const text = summary(collect());
+      const done = () => { copyB.textContent = "已复制 ✓"; setTimeout(() => { copyB.textContent = "复制档案"; }, 2400); track("cta_click", { state: "profile_copy" }); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text) && done());
+      else if (fallbackCopy(text)) done();
+    });
+    const fallbackCopy = (text) => { const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch {} ta.remove(); return ok; };
+    $("[data-pr-redo]", pr).addEventListener("click", () => { localStorage.removeItem("stk_profile"); restoreMarks({}); pr.hidden = true; pq.hidden = false; show(0); });
+    try {
+      const saved = JSON.parse(localStorage.getItem("stk_profile") || "null");
+      if (saved && saved.data && Date.now() - saved.t < 90 * 864e5) { restoreMarks(saved.data); finish(saved.data, true); }
+    } catch {}
   }
 
   // ---------- 加群终点页：按设备给入口 ----------
@@ -168,24 +309,37 @@
     const showQuota = (q) => { if (q) quotaEl.textContent = `今日剩余 ${q.left} 次`; };
     if (STATIC) { quotaEl.textContent = "演示模式"; $("#redeem").hidden = true; }
     else fetch("/api/trial/quota").then((r) => r.json()).then((d) => showQuota(d.quota)).catch(() => {});
-    $$("[data-sample]").forEach((b) => b.addEventListener("click", () => { ta.value = b.dataset.sample; ta.focus(); }));
+    // 每个示例绑定它自己的成片（data-video）；改写过的提示词在演示模式下不播放任何视频
+    const chipsS = $$("[data-sample]");
+    const pick = (b) => chipsS.forEach((x) => x.classList.toggle("on", x === b));
+    const matchSample = (text) => chipsS.find((b) => b.dataset.video && b.dataset.sample.trim() === text);
+    chipsS.forEach((b) => b.addEventListener("click", () => { ta.value = b.dataset.sample; pick(b); ta.focus(); }));
+    ta.addEventListener("input", () => pick(matchSample(ta.value.trim()) || null));
     const caseIdx = new URLSearchParams(location.search).get("case");
     if (caseIdx !== null && !ta.value.trim()) {
       const o = $$(".chip-o")[Number(caseIdx)];
-      if (o) ta.value = o.dataset.sample;
-    }
+      if (o) { ta.value = o.dataset.sample; pick(o); }
+    } else pick(matchSample(ta.value.trim()) || null);
     const lines = [];
     const say = (s) => { lines.push(`[${new Date().toTimeString().slice(0, 8)}] ${s}`); log.textContent = lines.slice(-9).join("\n"); };
     const fail = (m) => { err.textContent = m; err.hidden = false; go.disabled = false; go.textContent = "生成 5 秒视频"; };
+    const noVideo = () => {
+      err.textContent = "网页版不连机器，只能播放示例提示词对应的成片。想用你自己的提示词，";
+      const a = document.createElement("a"); a.href = `${BASE}/join${STATIC ? "/" : ""}`; a.textContent = "填档案申请内测，用真机跑 →"; err.append(a);
+      err.hidden = false; go.disabled = false; go.textContent = "生成 5 秒视频";
+      $(".screen-idle").hidden = false; log.hidden = true; pbar.hidden = true; out.hidden = true;
+    };
     go.addEventListener("click", async () => {
       err.hidden = true;
       const prompt = ta.value.trim();
       if (prompt.length < 4) return fail("先写一句画面描述。");
+      const sample = matchSample(prompt);
+      if ((STATIC || trial.dataset.mock === "1") && !sample) return noVideo();
       go.disabled = true; go.textContent = "生成中…";
       $(".screen-idle").hidden = true; out.hidden = true; log.hidden = false; pbar.hidden = false; lines.length = 0;
       say("提交任务 · MiniMax H3 标准生成 · 864×480 · 5 秒");
       if (STATIC) { // 静态版没有后端：在浏览器里走一遍流程，最后播放官方示例
-        say("演示模式：网页版不连机器，流程走完后播放 MiniMax 官方示例");
+        say("演示模式：网页版不连机器，流程走完后播放这条示例提示词对应的官方成片");
         const t0 = Date.now();
         let lastStep = -1;
         const tick = setInterval(() => {
@@ -195,7 +349,7 @@
           if (pct < 100) { if (step !== lastStep) { lastStep = step; say(`渲染中 ${pct}%`); } return; }
           clearInterval(tick);
           say("完成（演示）");
-          out.src = trial.dataset.mocksrc; out.hidden = false; log.hidden = true; pbar.hidden = true; out.play().catch(() => {});
+          out.src = sample.dataset.video; out.hidden = false; log.hidden = true; pbar.hidden = true; out.play().catch(() => {});
           go.disabled = false; go.textContent = "加入共创，用真机跑";
           go.onclick = () => { location.href = `${BASE}/join/`; };
           track("trial_success");
@@ -204,12 +358,12 @@
       }
       let r;
       try {
-        r = await fetch("/api/trial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, token: document.body.dataset.token, ch: cp.ch, p: cp.p }) });
+        r = await fetch("/api/trial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, token: document.body.dataset.token, ch: cp.ch, p: cp.p, sample: sample ? sample.dataset.case : null }) });
       } catch { return fail("网络出错了，稍后再试。"); }
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { if (d.quotaOut) openModal(); say("未提交：" + (d.error || r.status)); return fail(d.error || "提交失败"); }
+      if (!r.ok) { if (d.mockCustom) return noVideo(); if (d.quotaOut) openModal(); say("未提交：" + (d.error || r.status)); return fail(d.error || "提交失败"); }
       showQuota(d.quota);
-      say(d.mock ? "模拟模式：走完整流程，最后返回官方示例视频" : "已分配到 Siltok 远程机器");
+      say(d.mock ? "模拟模式：走完整流程，最后播放这条示例提示词对应的官方成片" : "已分配到 Siltok 远程机器");
       const t0 = Date.now(); let last = -1;
       const poll = async () => {
         let s;
@@ -232,4 +386,130 @@
       err.textContent = d.msg || "兑换失败"; err.hidden = false; err.style.color = r.ok ? "#14804a" : ""; showQuota(d.quota);
     });
   }
+
+  // ---------- 滚动驱动（参照 OpenCreator）：首屏钉住 + 场景切换 ----------
+  const pinOK = () => innerWidth > 900 && !reduce;
+  const hpin = $("[data-hpin]"), artEl = $("[data-art]"), scn = $("[data-scn]");
+  let scnUpdate = () => {};
+  const progress = (el) => { const total = el.offsetHeight - innerHeight; return total > 0 ? Math.min(1, Math.max(0, -el.getBoundingClientRect().top / total)) : 0; };
+  const onScroll = () => {
+    if (hpin) {
+      const p = pinOK() ? progress(hpin) : 0;
+      hpin.style.setProperty("--p", p.toFixed(4));
+      if (artEl) { // 标题和美术卡片淡出后暂停动画，省电
+        const off = p > 0.55;
+        if (off && !artEl.dataset.off) artEl.dataset.off = "1";
+        else if (!off && artEl.dataset.off) { delete artEl.dataset.off; if (artEl._wake) artEl._wake(); }
+      }
+    }
+    scnUpdate();
+  };
+  let ticking = false;
+  addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(() => { ticking = false; onScroll(); }); } }, { passive: true });
+  addEventListener("resize", onScroll);
+
+  if (scn) {
+    const lis = $$(".scn-list li", scn), vids = $$(".scn-card video", scn), bgs = $$(".scn-bg img", scn);
+    const card = $("[data-scn-card]", scn), stage = $(".scn-stage", scn);
+    let cur = -1, inView = false;
+    const size = () => { // 卡片按当前视频比例变形：横屏 16:9 ↔ 竖屏 9:16
+      const [a, b] = (lis[Math.max(cur, 0)].dataset.ar || "16/9").split("/").map(Number), r = a / b;
+      const W = stage.clientWidth || 560, H = Math.min(innerHeight * 0.64, 560);
+      let w = Math.min(W, H * r), h = w / r;
+      if (h > H) { h = H; w = h * r; }
+      card.style.width = Math.round(w) + "px"; card.style.height = Math.round(h) + "px";
+    };
+    const set = (i) => {
+      if (i === cur) return;
+      cur = i;
+      lis.forEach((l, j) => l.classList.toggle("on", j === i));
+      bgs.forEach((g, j) => g.classList.toggle("on", j === i));
+      vids.forEach((v, j) => { v.classList.toggle("on", j === i); if (j === i && inView) v.play().catch(() => {}); else v.pause(); });
+      $("[data-scn-tag]", scn).textContent = "✦ " + lis[i].dataset.t;
+      $("[data-scn-meta]", scn).textContent = lis[i].dataset.meta;
+      $("[data-scn-cap]", scn).textContent = lis[i].dataset.cap;
+      size();
+    };
+    scnUpdate = () => { if (pinOK()) set(Math.min(lis.length - 1, Math.floor(progress(scn) * lis.length * 0.999))); };
+    lis.forEach((l, i) => l.addEventListener("click", () => {
+      if (!pinOK()) return set(i);
+      const total = scn.offsetHeight - innerHeight;
+      scrollTo({ top: scn.getBoundingClientRect().top + scrollY + total * ((i + 0.5) / lis.length), behavior: "smooth" });
+    }));
+    new IntersectionObserver((es) => es.forEach((e) => { inView = e.isIntersecting; const v = vids[Math.max(cur, 0)]; if (inView && v) v.play().catch(() => {}); else vids.forEach((x) => x.pause()); }), { threshold: 0.05 }).observe(scn);
+    addEventListener("resize", size);
+    set(0);
+  }
+  onScroll();
+
+  // ---------- 故事板（参照 LibTV）：切换案例、点镜头跳到成片对应位置、播放时镜头跟着走 ----------
+  const sbx = $("[data-sb]");
+  if (sbx) {
+    const tabs = $$(".sb-tab", sbx), panels = $$(".sb-case", sbx);
+    const mm = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+    tabs.forEach((t) => t.addEventListener("click", () => {
+      tabs.forEach((x) => { x.classList.toggle("on", x === t); x.setAttribute("aria-selected", x === t ? "true" : "false"); });
+      panels.forEach((pn) => { const on = pn.dataset.case === t.dataset.case; pn.hidden = !on; if (!on) $(".sb-v", pn).pause(); });
+      track("cta_click", { state: "sb_" + t.dataset.case });
+    }));
+    panels.forEach((pn) => {
+      const v = $(".sb-v", pn), shots = $$(".sb-shot", pn);
+      let parts = [];
+      try { parts = JSON.parse(pn.dataset.parts || "[]"); } catch {}
+      let part = parts[0] ? parts[0].id : "";
+      const codeEl = $("[data-cur-code]", pn), timeEl = $("[data-cur-time]", pn), detEl = $("[data-cur-detail]", pn);
+      const setPart = (id, then) => {
+        if (id === part) { if (then) { if (v.readyState >= 1) then(); else { v.addEventListener("loadedmetadata", then, { once: true }); v.load(); } } return; }
+        const p = parts.find((x) => x.id === id);
+        if (!p) return;
+        part = id; v.src = BASE + p.src; v.poster = BASE + p.poster;
+        $$(".sb-parts button", pn).forEach((b) => b.classList.toggle("on", b.dataset.part === id));
+        if (then) v.addEventListener("loadedmetadata", then, { once: true });
+      };
+      $$(".sb-parts button", pn).forEach((b) => b.addEventListener("click", () => setPart(b.dataset.part, () => v.play().catch(() => {}))));
+      const show = (s) => {
+        shots.forEach((x) => x.classList.toggle("on", x === s));
+        codeEl.textContent = s.dataset.code;
+        timeEl.textContent = `${mm(+s.dataset.t)}–${mm(+s.dataset.end)}`;
+        detEl.textContent = "";
+        if (s.dataset.detail) {
+          let d = {};
+          try { d = JSON.parse(s.dataset.detail); } catch {}
+          const dl = document.createElement("dl"); dl.className = "sb-params";
+          Object.entries(d.d || {}).forEach(([k, val]) => { const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = val; dl.append(dt, dd); });
+          detEl.append(dl);
+          (d.p || []).forEach((pp) => { if (!pp.x) return; const h = document.createElement("p"), pre = document.createElement("pre"); h.className = "sb-k mono"; h.textContent = pp.t; pre.className = "sb-prompt"; pre.textContent = pp.x; detEl.append(h, pre); });
+        }
+        const row = s.parentElement;
+        if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: s.offsetLeft - row.clientWidth / 2 + s.clientWidth / 2, behavior: reduce ? "auto" : "smooth" });
+      };
+      shots.forEach((s) => s.addEventListener("click", () => {
+        show(s);
+        setPart(s.dataset.part, () => { v.currentTime = +s.dataset.t + 0.05; v.play().catch(() => {}); });
+        track("cta_click", { state: "sb_shot_" + pn.dataset.case });
+      }));
+      let lastAuto = null;
+      v.addEventListener("timeupdate", () => {
+        const t = v.currentTime;
+        const s = shots.find((x) => x.dataset.part === part && t >= +x.dataset.t && t < +x.dataset.end);
+        if (s && s !== lastAuto) { lastAuto = s; show(s); }
+      });
+      $$(".sb-kinds button", pn).forEach((b) => b.addEventListener("click", () => {
+        $$(".sb-kinds button", pn).forEach((x) => x.classList.toggle("on", x === b));
+        $$(".sb-agrid figure", pn).forEach((f) => { f.hidden = !!b.dataset.k && f.dataset.k !== b.dataset.k; });
+      }));
+    });
+  }
+
+  // ---------- 数字滚动计数（参照 OpenCreator 的统计卡） ----------
+  const cio = new IntersectionObserver((es, o) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    o.unobserve(e.target);
+    const el = e.target, to = Number(el.dataset.count) || 0;
+    if (reduce || !to) return;
+    const t0 = performance.now();
+    const step = (now) => { const k = Math.min(1, (now - t0) / 1400); el.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))).toLocaleString("zh-CN"); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }), { threshold: 0.6 });
+  $$("[data-count]").forEach((el) => cio.observe(el));
 })();

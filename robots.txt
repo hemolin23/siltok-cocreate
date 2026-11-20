@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://hemolin23.github.io/siltok-cocreate/sitemap.xml
