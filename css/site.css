@@ -837,3 +837,38 @@ details[open] .plus::after{transform:rotate(0)}
 @media (max-width:760px){ .sb-main{order:-1} .sb-assets{max-height:260px} }
 .sb-src{font-size:12px;line-height:1.6;color:var(--ink-2);background:#f6f6f3;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .sb-src b{margin-right:6px;color:var(--ink)}
+
+/* ---------- 智能体接入：光点聚合舞台（暗色只在舞台卡片里，外面仍是浅色方格纸） ---------- */
+.ag{position:relative;height:clamp(460px,46vw,580px);border-radius:var(--r);overflow:hidden;isolation:isolate;
+  background:radial-gradient(110% 85% at 50% 40%,#0e1d4a 0%,#070d26 50%,#03050f 100%);box-shadow:var(--shadow-lg)}
+.ag::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(140,180,255,.12);pointer-events:none;z-index:3}
+.ag canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.ag-bloom{filter:blur(9px) saturate(1.25);mix-blend-mode:screen;opacity:.85;pointer-events:none}
+
+.ag-hud{position:absolute;left:22px;right:22px;top:18px;display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.16em;color:rgba(186,206,255,.55);pointer-events:none;z-index:2}
+.ag-hud i{display:inline-block;width:6px;height:6px;border-radius:50%;background:#e4f43a;margin-right:8px;vertical-align:1px;box-shadow:0 0 10px #e4f43a}
+.ag-hint{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:12px;font-size:12px;letter-spacing:.14em;color:rgba(226,236,255,.86);pointer-events:none;z-index:2;white-space:nowrap;opacity:0;transition:opacity .6s var(--ease)}
+.ag-hint i{width:9px;height:9px;border-radius:50%;background:#e4f43a;animation:agPulse 1.8s ease-out infinite}
+@keyframes agPulse{0%{box-shadow:0 0 0 0 rgba(228,244,58,.6)}100%{box-shadow:0 0 0 18px rgba(228,244,58,0)}}
+.ag-live .ag-hint{opacity:1}
+.ag-live.is-on .ag-hint{opacity:0}
+.ag-fallback{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:10px;color:#fff;pointer-events:none}
+.ag-fallback b{font-size:clamp(56px,9vw,120px);font-weight:800;letter-spacing:-.04em;line-height:1}
+.ag-fallback span{font-size:12px;letter-spacing:.32em;color:rgba(200,220,255,.7)}
+.ag-live .ag-fallback{display:none}
+.ag-list{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.ag-chip{display:inline-flex;align-items:center;gap:8px;padding:5px 14px 5px 5px;border-radius:999px;background:var(--paper);border:1px solid var(--line);font-size:13.5px;color:var(--ink-2);line-height:1}
+.ag-chip img{width:26px;height:26px;border-radius:7px;display:block}
+.ag-more{padding:9px 14px;color:var(--ink-3)}
+.ag-feats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:22px}
+.ag-feat{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-md);padding:20px 20px 22px}
+.ag-feat .mono{font-size:11px;color:var(--ink-3);letter-spacing:.12em}
+.ag-feat b{display:block;font-size:17px;margin:8px 0 6px;letter-spacing:-.01em}
+.ag-feat p{font-size:14px;color:var(--ink-2);line-height:1.65}
+/* 整机：三个理由（产品资料：自主掌控 / 成本可控 / 灵活互联） */
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0 6px}
+.pillars p{background:var(--soft);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 14px 15px;font-size:13px;color:var(--ink-2);line-height:1.55}
+.pillars .mono{display:block;font-size:10.5px;color:var(--ink-3);letter-spacing:.12em}
+.pillars b{display:block;font-size:16px;color:var(--ink);margin:4px 0}
+@media (max-width:980px){.ag-feats{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:640px){.ag{height:440px;border-radius:var(--r-md)}.ag-hud{font-size:9.5px;letter-spacing:.1em;left:16px;right:16px;top:14px}.ag-hud span:first-child{display:none}.ag-feats{grid-template-columns:1fr}.pillars{grid-template-columns:1fr}.ag-hint{font-size:11px;letter-spacing:.08em}}

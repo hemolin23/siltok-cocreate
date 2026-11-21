@@ -512,4 +512,248 @@
     requestAnimationFrame(step);
   }), { threshold: 0.6 });
   $$("[data-count]").forEach((el) => cio.observe(el));
+
+  // ---------- 智能体接入：光点聚合（参照粒子人形影像：方形光点、光丝拖尾、水面倒影） ----------
+  // 平时光点顺着水流漂；鼠标移进舞台，光点飞到指针处，拼出 Siltok 字样，外圈一环智能体图标慢慢转；移出就散开。
+  // 触屏没有悬停：进入视口自动聚拢，点哪聚到哪。减少动态效果时直接画聚好的静帧。
+  const ag = $("[data-ag]");
+  if (ag) (() => {
+    const cv = $(".ag-cv", ag), bl = $(".ag-bloom", ag), hint = $("[data-ag-hint] span", ag);
+    const ctx = cv.getContext("2d"), bctx = bl.getContext("2d");
+    if (!ctx || !bctx) return;
+    const pc = document.createElement("canvas"), px = pc.getContext("2d"); // 粒子层（也喂给辉光层）
+    const sc = document.createElement("canvas"), sx = sc.getContext("2d"); // 合成层：粒子 + 图标 + 字，倒影从这里取
+    const fine = matchMedia("(hover: hover) and (pointer: fine)").matches;
+    const FONT = '"Avenir Next","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif';
+    const chips = $$("[data-ag-chip]");
+    const logos = chips.map((el) => ({ img: new Image(), src: $("img", el).src, name: el.dataset.name, ok: false }));
+    const COLS = ["#2453ff", "#3f86ff", "#49d0ff", "#c4ecff", "#ffffff", "#e4f43a", ...chips.map((el) => el.dataset.c || "#ffffff")];
+    const NC = COLS.length, NL = logos.length, MAXN = 2600;
+    const X = new Float32Array(MAXN), Y = new Float32Array(MAXN), VX = new Float32Array(MAXN), VY = new Float32Array(MAXN);
+    const SZ = new Float32Array(MAXN), KS = new Float32Array(MAXN), PH = new Float32Array(MAXN), PA = new Float32Array(MAXN), PB = new Float32Array(MAXN);
+    const ROLE = new Uint8Array(MAXN), COL = new Uint8Array(MAXN), HX = new Float32Array(MAXN), HY = new Float32Array(MAXN);
+    const LX = new Float32Array(NL), LY = new Float32Array(NL), LZ = new Float32Array(NL);
+    const G = { rx: 0, ry: 0, fs: 0, logo: 0, small: false }, F = { x: 0, y: 0 }, P = { x: 0, y: 0, on: false };
+    let N = 0, W = 0, H = 0, DPR = 1, HZ = 0, TP = [], spacing = null, ghost = null;
+    let t = 0, gather = 0, want = 0, rot = 0, acc = 0, last = 0, raf = 0, inView = false, loaded = false;
+    const clamp = (v, a, b) => (a > b ? (a + b) / 2 : Math.max(a, Math.min(b, v)));
+    const sat = (v) => Math.max(0, Math.min(1, v));
+    const ease = (v) => v * v * (3 - 2 * v);
+    const pickBase = () => { const r = Math.random(); return r < 0.3 ? 0 : r < 0.6 ? 1 : r < 0.8 ? 2 : r < 0.92 ? 3 : r < 0.985 ? 4 : 5; };
+    // 每个图标一张同色光晕贴图（只画一次）
+    const glow = COLS.slice(6).map((c) => {
+      const s = 128, g = document.createElement("canvas"); g.width = g.height = s;
+      const x = g.getContext("2d"), rg = x.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      rg.addColorStop(0, c + "88"); rg.addColorStop(0.45, c + "26"); rg.addColorStop(1, c + "00");
+      x.fillStyle = rg; x.fillRect(0, 0, s, s); return g;
+    });
+    function loadLogos() {
+      if (loaded) return; loaded = true;
+      logos.forEach((l) => { l.img.decoding = "async"; l.img.onload = () => { l.ok = true; if (reduce) render(); }; l.img.src = l.src; });
+    }
+
+    // “Siltok”字形取点：先量出字的面积，再按要用的光点数定网格间距，排成点阵字（比随机撒点好认）
+    function buildText(want) {
+      const c = document.createElement("canvas"), g = c.getContext("2d"), font = `800 ${G.fs}px ${FONT}`;
+      g.font = font;
+      const w = Math.ceil(g.measureText("Siltok").width) + 16, h = Math.ceil(G.fs * 1.3);
+      c.width = w; c.height = h;
+      g.font = font; g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText("Siltok", w / 2, h / 2);
+      const d = g.getImageData(0, 0, w, h).data;
+      let area = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 150) area++;
+      const st = Math.max(1.8, Math.sqrt(area / Math.max(1, want)));
+      TP = [];
+      for (let y = st / 2; y < h; y += st) for (let x = st / 2; x < w; x += st) {
+        const xi = x | 0, yi = y | 0;
+        if (d[(yi * w + xi) * 4 + 3] > 150) TP.push([xi - w / 2, yi - h / 2 - G.fs * 0.16]);
+      }
+      for (let i = TP.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0, tmp = TP[i]; TP[i] = TP[j]; TP[j] = tmp; }
+      // 字形底光：同一个字带模糊光晕画一层，垫在光点下面
+      ghost = document.createElement("canvas"); ghost.width = w + 60; ghost.height = h + 60;
+      const q = ghost.getContext("2d"); q.font = font; q.textAlign = "center"; q.textBaseline = "middle";
+      q.shadowColor = "rgba(80,140,255,1)"; q.shadowBlur = 28; q.fillStyle = "rgba(110,165,255,.5)";
+      q.fillText("Siltok", ghost.width / 2, ghost.height / 2);
+    }
+
+    // 角色：1 字形 · 2 图标光环 · 3 图标轨道 · 4 外圈反向轨道 · 0 自由光点（聚拢时绕在外圈）
+    function assign() {
+      N = Math.min(MAXN, Math.max(900, Math.round((W * H) / (G.small ? 240 : 290))));
+      buildText(Math.round(N * 0.42));
+      const per = G.small ? 9 : 16, nT = Math.min(TP.length, Math.round(N * 0.42));
+      const nA = Math.round(N * 0.12), nB = Math.round(N * 0.05);
+      for (let i = 0; i < N; i++) {
+        HX[i] = X[i] = Math.random() * W; HY[i] = Y[i] = Math.random() * HZ; VX[i] = VY[i] = 0;
+        PH[i] = Math.random() * 6.283; KS[i] = 0.016 + Math.random() * 0.03;
+        const r = Math.random(); SZ[i] = r < 0.06 ? 2.6 + Math.random() * 1.2 : r < 0.42 ? 1.5 + Math.random() * 0.7 : 0.8 + Math.random() * 0.6;
+        COL[i] = pickBase(); ROLE[i] = 0; PA[i] = Math.random() * 6.283; PB[i] = 1.15 + Math.random() * 0.8;
+      }
+      let j = 0;
+      for (let k = 0; k < nT; k++, j++) { ROLE[j] = 1; PA[j] = TP[k][0]; PB[j] = TP[k][1]; SZ[j] = 1.6 + Math.random() * 1.1; COL[j] = [4, 4, 4, 3, 3, 2][(Math.random() * 6) | 0]; }
+      for (let l = 0; l < NL; l++) for (let h = 0; h < per; h++, j++) { ROLE[j] = 2; PA[j] = l; PB[j] = (h / per) * 6.283 + Math.random() * 0.4; COL[j] = Math.random() < 0.6 ? 6 + l : 3; }
+      for (let k = 0; k < nA; k++, j++) { ROLE[j] = 3; PA[j] = (k / nA) * 6.283 + Math.random() * 0.05; PB[j] = (Math.random() - 0.5) * 12; }
+      for (let k = 0; k < nB; k++, j++) { ROLE[j] = 4; PA[j] = (k / nB) * 6.283; PB[j] = (Math.random() - 0.5) * 16; COL[j] = Math.random() < 0.5 ? 0 : 1; }
+    }
+
+    function layout() {
+      const r = ag.getBoundingClientRect();
+      W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
+      DPR = Math.min(2, window.devicePixelRatio || 1);
+      for (const c of [cv, pc, sc]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+      bl.width = Math.max(1, Math.round(W / 2)); bl.height = Math.max(1, Math.round(H / 2));
+      HZ = Math.round(H * 0.8); // 水平线：下面是倒影
+      G.small = W < 640;
+      G.rx = Math.min(W * (G.small ? 0.4 : 0.3), 380);
+      G.ry = Math.min(G.rx * (G.small ? 0.7 : 0.4), HZ * 0.3);
+      G.logo = Math.round(G.small ? 30 : Math.min(54, Math.max(40, G.rx * 0.15)));
+      G.fs = Math.round(Math.min(G.rx * (G.small ? 0.62 : 0.56), G.small ? 64 : 118));
+      spacing = null;
+      assign();
+      F.x = P.x = W / 2; F.y = P.y = HZ * 0.5;
+    }
+
+    function physics() {
+      t += 1 / 60; rot += 0.0013; // 图标环约 80 秒转一圈
+      gather += (want - gather) * (want > gather ? 0.03 : 0.045);
+      const g = ease(sat(gather)), m = G.logo * 0.6;
+      F.x += (clamp(P.x, G.rx + m + 40, W - G.rx - m - 40) - F.x) * 0.085;
+      F.y += (clamp(P.y, G.ry + m + 16, HZ - G.ry - m - (G.small ? 18 : 34)) - F.y) * 0.085;
+      for (let l = 0; l < NL; l++) { const a = rot + (l / NL) * 6.283, z = Math.sin(a); LX[l] = F.x + Math.cos(a) * G.rx; LY[l] = F.y + z * G.ry; LZ[l] = (z + 1) / 2; }
+      const damp = 0.955 - 0.115 * g, spin = 0.0035 * g;
+      for (let i = 0; i < N; i++) {
+        const x = X[i], y = Y[i], r = ROLE[i];
+        // 水流：几层正弦叠成的流场，再用一根很软的弹簧拴在各自的“家”附近，平时铺满画面不扎堆
+        let ax = (Math.sin(y * 0.011 + t * 0.35 + PH[i] * 0.3) + Math.sin((x + y) * 0.004 - t * 0.2)) * 0.032 + (HX[i] - x) * 0.0006;
+        let ay = (Math.cos(x * 0.009 - t * 0.27) * 0.6 + Math.sin(x * 0.003 + PH[i]) * 0.35) * 0.03 + (HY[i] - y) * 0.0006;
+        if (g > 0.002) {
+          let tx, ty;
+          if (r === 1) { tx = F.x + PA[i] + Math.sin(t * 1.7 + PH[i]) * 0.6; ty = F.y + PB[i] + Math.cos(t * 1.3 + PH[i]) * 0.6; }
+          else if (r === 2) { const l = PA[i], a = PB[i] + t * 1.25, rr = G.logo * (0.5 + 0.18 * LZ[l]) + 5 + Math.sin(t * 2.2 + PH[i]) * 1.5; tx = LX[l] + Math.cos(a) * rr; ty = LY[l] + Math.sin(a) * rr; }
+          else if (r === 3) { const a = PA[i] + t * 0.38; tx = F.x + Math.cos(a) * (G.rx + PB[i]); ty = F.y + Math.sin(a) * (G.ry + PB[i] * 0.4); }
+          else if (r === 4) { const a = -(PA[i] + t * 0.22); tx = F.x + Math.cos(a) * (G.rx * 1.16 + PB[i]); ty = F.y + Math.sin(a) * (G.ry * 1.25 + PB[i] * 0.4); }
+          else { const a = PA[i] + t * 0.04; tx = F.x + Math.cos(a) * G.rx * PB[i] + Math.sin(t * 0.5 + PH[i]) * 16; ty = F.y + Math.sin(a) * G.ry * PB[i] * 1.15 + Math.cos(t * 0.4 + PH[i]) * 10; }
+          const dx = tx - x, dy = ty - y, k = (r ? KS[i] : KS[i] * 0.2) * g, keep = r ? 1 - g : 1 - g * 0.6;
+          ax = ax * keep + dx * k; ay = ay * keep + dy * k;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > 2500) { const s = spin * Math.min(1, d2 / 60000); ax -= dy * s; ay += dx * s; } // 远处的光点打着旋飞进来
+        }
+        let vx = VX[i] * damp + ax, vy = VY[i] * damp + ay;
+        const sp = vx * vx + vy * vy; if (sp > 900) { const f = 30 / Math.sqrt(sp); vx *= f; vy *= f; }
+        VX[i] = vx; VY[i] = vy; X[i] = x + vx; Y[i] = y + vy;
+        if (g < 0.35 && (X[i] < -60 || X[i] > W + 60 || Y[i] < -60 || Y[i] > HZ + 40)) { X[i] = HX[i]; Y[i] = HY[i]; VX[i] = VY[i] = 0; } // 飞太远就回家
+      }
+    }
+
+    function logo(l, g) {
+      const a = sat((g - 0.2 - l * 0.025) / 0.45);
+      if (a <= 0) return;
+      const z = LZ[l], s = G.logo * (0.74 + 0.36 * z) * (0.65 + 0.35 * ease(a)), x = LX[l], y = LY[l], L = logos[l];
+      sx.globalAlpha = a * (0.45 + 0.55 * z);
+      sx.globalCompositeOperation = "lighter"; sx.drawImage(glow[l], x - s * 1.25, y - s * 1.25, s * 2.5, s * 2.5); sx.globalCompositeOperation = "source-over";
+      if (L.ok) sx.drawImage(L.img, x - s / 2, y - s / 2, s, s);
+      else { sx.fillStyle = "rgba(40,60,130,.9)"; sx.fillRect(x - s / 2, y - s / 2, s, s); }
+      if (!G.small) { sx.font = `500 11.5px ${FONT}`; sx.textAlign = "center"; sx.textBaseline = "top"; sx.fillStyle = "rgba(205,222,255,.92)"; sx.fillText(L.name, x, y + s / 2 + 7); }
+      sx.globalAlpha = 1;
+    }
+    function name(g) {
+      const a = sat((g - 0.55) / 0.35);
+      if (a <= 0) return;
+      const f1 = Math.max(11, Math.round(G.fs * 0.12)), y0 = F.y + G.fs * 0.42, txt = "AI TOKEN STATION", font = `600 ${f1}px ${FONT}`;
+      sx.globalAlpha = a; sx.textBaseline = "middle"; sx.font = font; sx.fillStyle = "#dbe8ff"; sx.textAlign = "left";
+      if (!spacing) { const ws = [...txt].map((ch) => sx.measureText(ch).width), sp = f1 * 0.42; spacing = { ws, sp, total: ws.reduce((p, q) => p + q, 0) + sp * (txt.length - 1) }; }
+      let x = F.x - spacing.total / 2;
+      [...txt].forEach((ch, i) => { sx.fillText(ch, x, y0); x += spacing.ws[i] + spacing.sp; });
+      sx.textAlign = "center";
+      if (!G.small) { sx.font = `400 ${Math.max(11, Math.round(f1 * 0.95))}px ${FONT}`; sx.fillStyle = "rgba(160,186,235,.92)"; sx.fillText("硅基词元 · 你的第一台个人 AI 主机", F.x, y0 + f1 * 1.9); }
+      sx.globalAlpha = 1;
+    }
+
+    const paths = () => Array.from({ length: NC * 2 }, () => new Path2D());
+    function render() {
+      const g = ease(sat(gather));
+      // 1. 粒子层：按颜色和明暗分桶，一桶一次填充；跑得快的光点拖出光丝
+      px.setTransform(DPR, 0, 0, DPR, 0, 0); px.globalCompositeOperation = "source-over"; px.globalAlpha = 1; px.clearRect(0, 0, W, H);
+      const sq = paths(), st = paths(), tw = t * 3.1;
+      for (let i = 0; i < N; i++) {
+        const x = X[i], y = Y[i];
+        if (x < -30 || x > W + 30 || y < -30 || y > HZ + 4) continue;
+        const b = COL[i] * 2 + (Math.sin(tw + PH[i] * 5) > (ROLE[i] === 1 ? -0.6 : 0.3) ? 1 : 0), vx = VX[i], vy = VY[i], s = SZ[i];
+        if (vx * vx + vy * vy > 2.2) { st[b].moveTo(x - vx * 2.6, y - vy * 2.6); st[b].lineTo(x, y); }
+        sq[b].rect(x - s / 2, y - s / 2, s, s);
+      }
+      px.globalCompositeOperation = "lighter"; px.lineWidth = 1.1; px.lineCap = "round";
+      for (let b = 0; b < NC * 2; b++) { px.globalAlpha = b & 1 ? 1 : 0.5; px.fillStyle = px.strokeStyle = COLS[b >> 1]; px.stroke(st[b]); px.fill(sq[b]); }
+      px.globalAlpha = 1;
+      // 2. 辉光层：粒子层缩小一半，交给 CSS 模糊后叠在上面
+      bctx.clearRect(0, 0, bl.width, bl.height); bctx.drawImage(pc, 0, 0, bl.width, bl.height);
+      // 3. 合成层：核心光晕 → 后排图标 → 粒子 → 前排图标 → 产品名
+      sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalCompositeOperation = "source-over"; sx.globalAlpha = 1; sx.clearRect(0, 0, sc.width, sc.height);
+      sx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      if (g > 0.01) {
+        sx.save(); sx.translate(F.x, F.y); sx.scale(1, 0.56);
+        const rg = sx.createRadialGradient(0, 0, 0, 0, 0, G.rx * 1.15);
+        rg.addColorStop(0, `rgba(70,120,255,${0.26 * g})`); rg.addColorStop(0.55, `rgba(40,80,230,${0.08 * g})`); rg.addColorStop(1, "rgba(30,60,200,0)");
+        sx.fillStyle = rg; sx.fillRect(-G.rx * 1.2, -G.rx * 1.2, G.rx * 2.4, G.rx * 2.4); sx.restore();
+      }
+      const ta = sat((g - 0.35) / 0.4);
+      if (ta > 0 && ghost) { sx.globalAlpha = 0.55 * ta; sx.globalCompositeOperation = "lighter"; sx.drawImage(ghost, F.x - ghost.width / 2, F.y - G.fs * 0.16 - ghost.height / 2); sx.globalCompositeOperation = "source-over"; sx.globalAlpha = 1; }
+      const order = Array.from({ length: NL }, (_, l) => l).sort((a, b) => LZ[a] - LZ[b]);
+      for (const l of order) if (LZ[l] < 0.5) logo(l, g);
+      sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalCompositeOperation = "lighter"; sx.drawImage(pc, 0, 0); sx.globalCompositeOperation = "source-over";
+      sx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      for (const l of order) if (LZ[l] >= 0.5) logo(l, g);
+      name(g);
+      // 4. 上屏 + 水面倒影：一条条错开的细带，越往下越淡
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, cv.width, cv.height); ctx.drawImage(sc, 0, 0);
+      const hz = Math.round(HZ * DPR), sh = Math.max(2, Math.round(2 * DPR)), n = Math.ceil((cv.height - hz) / sh);
+      for (let k = 0; k < n; k++) {
+        const sy = hz - (k + 1) * sh * 1.2; if (sy < 0) break;
+        ctx.globalAlpha = 0.42 * Math.pow(1 - k / n, 1.6);
+        ctx.drawImage(sc, 0, sy, sc.width, sh * 1.2, Math.sin(k * 0.5 + t * 2.3) * (0.8 + k * 0.05) * DPR, hz + k * sh, cv.width, sh);
+      }
+      ctx.globalAlpha = 1; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const lg = ctx.createLinearGradient(0, 0, W, 0);
+      lg.addColorStop(0, "rgba(90,150,255,0)"); lg.addColorStop(0.5, `rgba(130,195,255,${0.16 + 0.22 * g})`); lg.addColorStop(1, "rgba(90,150,255,0)");
+      ctx.fillStyle = lg; ctx.fillRect(0, HZ, W, 1);
+    }
+
+    function scatter() { // 鼠标离开：光点从中心向外炸开，再回到水流里
+      for (let i = 0; i < N; i++) { const dx = X[i] - F.x, dy = Y[i] - F.y, d = Math.hypot(dx, dy) || 1, f = 1.5 + Math.random() * 4.5; VX[i] += (dx / d) * f; VY[i] += (dy / d) * f * 0.6; }
+    }
+    function still() { want = gather = 1; P.x = W / 2; P.y = HZ * 0.5; for (let s = 0; s < 260; s++) physics(); render(); }
+    function frame(now) {
+      raf = 0;
+      if (!inView || document.hidden) return;
+      const dt = last ? Math.min(100, now - last) : 16.7; last = now; acc += dt;
+      let n = 0; while (acc >= 16.6 && n < 3) { physics(); acc -= 16.6; n++; } // 固定 60 步/秒，高刷屏也不会变快
+      if (acc > 50) acc = 0;
+      if (n) render();
+      raf = requestAnimationFrame(frame);
+    }
+    const kick = () => { if (!raf && inView && !document.hidden && !reduce) { last = 0; raf = requestAnimationFrame(frame); } };
+
+    const pos = (e) => { const r = ag.getBoundingClientRect(); P.x = e.clientX - r.left; P.y = e.clientY - r.top; };
+    if (fine) {
+      const on = (e) => { pos(e); P.on = true; if (!want) { want = 1; ag.classList.add("is-on"); } };
+      ag.addEventListener("pointerenter", on); ag.addEventListener("pointermove", on);
+      ag.addEventListener("pointerleave", () => { P.on = false; want = 0; ag.classList.remove("is-on"); scatter(); });
+    } else {
+      if (hint) hint.textContent = "轻点画面，光点会聚到你点的地方";
+      ag.addEventListener("pointerdown", pos);
+    }
+    new IntersectionObserver((es) => es.forEach((e) => {
+      inView = e.isIntersecting;
+      if (!inView) return;
+      loadLogos();
+      if (reduce) return;
+      if (!fine && !want) { want = 1; ag.classList.add("is-on"); }
+      kick();
+    }), { threshold: 0.12 }).observe(ag);
+    document.addEventListener("visibilitychange", kick);
+    new ResizeObserver(() => { const r = ag.getBoundingClientRect(); if (Math.round(r.width) === W && Math.round(r.height) === H) return; layout(); if (reduce) still(); }).observe(ag);
+    ag.classList.add("ag-live");
+    layout();
+    if (reduce) { ag.classList.add("is-on"); loadLogos(); still(); }
+  })();
 })();
