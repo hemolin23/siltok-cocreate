@@ -884,3 +884,6 @@ details[open] .plus::after{transform:rotate(0)}
 .qr-wait{display:flex;flex-direction:column;justify-content:center;min-height:240px;border:1px dashed var(--line-2);background:transparent;box-shadow:none}
 @media (max-width:1080px){.skl{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:760px){.skl{grid-template-columns:1fr}}
+/* 招募页结果：右栏两个码（第 1 步大群、第 2 步企业微信）；手机上码排在最前 */
+.pr-qrs{display:grid;gap:24px}
+@media (max-width:1080px){.pr-qrs{order:-1}}

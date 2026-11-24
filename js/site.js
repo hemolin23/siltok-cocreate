@@ -208,15 +208,13 @@
       setTimeout(() => { if (!hover) set(true); }, 1000); setTimeout(() => { if (!hover) set(false); }, 3400); }), { threshold: 0.5 }).observe(st);
   });
 
-  // ---------- 创作者档案：答题 → 留联系方式（飞书预填）→ 出群码 / 活码 + 复制档案 ----------
+  // ---------- 创作者档案：答题 → 第 1 步大群群码（不用填信息）→ 第 2 步按方向加企业微信 → 选填飞书档案（预填） ----------
   // 答案只存在本机浏览器（stk_profile）；飞书链接只带画像类答案，称呼、微信号让用户在飞书里自己填。
   const prof = $("[data-profile]");
   if (prof) {
     const pq = $("[data-pq]", prof), pr = $("[data-pr]", prof), Qs = $$(".pq-q", prof);
     const stepEl = $("[data-pq-step]", prof), pbar = $("[data-pq-bar]", prof), back = $("[data-pq-back]", prof);
     const nextMap = JSON.parse(prof.dataset.next || "{}");
-    const qrBox = $("[data-pr-qr]", prof), qrWait = $("[data-pr-wait]", prof);
-    const showQr = (on) => { if (qrBox) qrBox.hidden = !on; if (qrWait) qrWait.hidden = on; };
     const withBase = (u) => (u && u.startsWith("/") && !u.startsWith(BASE + "/") ? BASE + u : u);
     let cur = 0;
     const show = (i) => { Qs.forEach((q, j) => { q.hidden = j !== i; }); cur = i; stepEl.textContent = i + 1; pbar.style.width = (i / Qs.length) * 100 + "%"; back.hidden = i === 0; };
@@ -238,18 +236,17 @@
         const ps = new URLSearchParams();
         Object.values(data).forEach((a) => { if (a.v.length) ps.append("prefill_" + a.field, a.v.join(",")); });
         ps.append("prefill_" + src, "官网-" + (cp.ch || "direct")); ps.append("hide_" + src, "1");
-        fa.href = form + (form.includes("?") ? "&" : "?") + ps.toString(); fa.textContent = "填写联系方式 ↗";
-        note.textContent = "会打开飞书表单：选择题已经帮你填好，只需补称呼和微信号（手机号选填）。填完回到这里点“已填好”。";
-      } else if (lv === "L4") { fa.href = prof.dataset.biz; fa.textContent = "填写合作报价 ↗"; note.textContent = "会打开飞书合作报价表，商务会跟进；填完回到这里点“已填好”拿群码。"; }
-      else { fa.href = prof.dataset.beta; fa.textContent = "填写内测申请 ↗"; note.textContent = "会打开飞书内测申请表，留下称呼和微信号即可；填完回到这里点“已填好”。"; }
+        fa.href = form + (form.includes("?") ? "&" : "?") + ps.toString(); fa.textContent = "填档案排队体验 ↗";
+        note.textContent = "会打开飞书档案表：选择题已经帮你填好，补个称呼和微信号就能排队体验。";
+      } else if (lv === "L4") { fa.href = prof.dataset.biz; fa.textContent = "填写合作报价 ↗"; note.textContent = "会打开飞书合作报价表，商务会跟进。"; }
+      else { fa.href = prof.dataset.beta; fa.textContent = "填写内测申请 ↗"; note.textContent = "会打开飞书内测申请表。"; }
       $("[data-pr-staff]", pr).href = `${BASE}/join/${p}${STATIC ? "/" : ""}?ch=${encodeURIComponent(cp.ch || "direct")}`;
-      const rt = JSON.parse(prof.dataset.routes || "{}")[p];
-      if (rt && rt.qr && qrBox) { // 这个方向配了“联系我”活码：先加员工，自动打标签、自动发群码
-        const im = $("[data-pr-qrimg]", qrBox); im.src = withBase(rt.qr); im.alt = "Siltok 共创计划企业微信活码";
-        $("[data-pr-qrname]", qrBox).textContent = "Siltok 共创计划 · 企业微信";
-        $("[data-pr-qrtip]", qrBox).textContent = "扫码加企业微信，会自动收到欢迎语和群码";
+      const ct = JSON.parse(prof.dataset.contacts || "{}")[p], ctBox = $("[data-pr-ct]", prof);
+      if (ct && ctBox) { // 第 2 步：这个方向要加的企业微信（活码或对接人）
+        const im = $("[data-pr-ctimg]", ctBox); im.src = withBase(ct.qr); im.alt = ct.wecom ? "Siltok 共创计划企业微信活码" : ct.name + "的企业微信二维码";
+        $("[data-pr-ctname]", ctBox).textContent = ct.name; $("[data-pr-ctrole]", ctBox).textContent = ct.role;
+        $("[data-pr-cttip]", ctBox).textContent = ct.wecom ? "加好友后自动收到欢迎语，按你的方向打标签" : "说一下你的创作方向，帮你排体验、对接合作";
       }
-      showQr(!!localStorage.getItem("stk_contact"));
       if (!restored) pr.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
     };
     Qs.forEach((q, i) => {
@@ -271,11 +268,7 @@
       else if (fallbackCopy(text)) done();
     });
     const fallbackCopy = (text) => { const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch {} ta.remove(); return ok; };
-    $("[data-pr-done]", pr).addEventListener("click", () => {
-      localStorage.setItem("stk_contact", String(Date.now())); showQr(true); track("cta_click", { state: "profile_contact_done" });
-      if (qrBox) qrBox.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
-    });
-    $("[data-pr-redo]", pr).addEventListener("click", () => { localStorage.removeItem("stk_profile"); localStorage.removeItem("stk_contact"); showQr(false); restoreMarks({}); pr.hidden = true; pq.hidden = false; show(0); });
+    $("[data-pr-redo]", pr).addEventListener("click", () => { localStorage.removeItem("stk_profile"); restoreMarks({}); pr.hidden = true; pq.hidden = false; show(0); });
     const wantSkill = new URLSearchParams(location.search).get("skill"); // 技能卡片点进来：预选这个方向
     if (wantSkill) { const f = Qs.find((q) => q.dataset.q === "skill"); const o = f && $$(".pq-opt", f).find((x) => x.dataset.v === wantSkill); if (o) { o.classList.add("on"); const nb = $("[data-pq-next]", f); if (nb) nb.disabled = false; } }
     try {
