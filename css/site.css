@@ -872,3 +872,15 @@ details[open] .plus::after{transform:rotate(0)}
 .pillars b{display:block;font-size:16px;color:var(--ink);margin:4px 0}
 @media (max-width:980px){.ag-feats{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:640px){.ag{height:440px;border-radius:var(--r-md)}.ag-hud{font-size:9.5px;letter-spacing:.1em;left:16px;right:16px;top:14px}.ag-hud span:first-child{display:none}.ag-feats{grid-template-columns:1fr}.pillars{grid-template-columns:1fr}.ag-hint{font-size:11px;letter-spacing:.08em}}
+
+/* 工作站技能（规划中）：复用 .task 卡片，4 列 */
+.skl{grid-template-columns:repeat(4,1fr);margin-bottom:28px}
+.skl .task{display:flex;flex-direction:column;color:inherit;text-decoration:none;transition:transform .2s ease,box-shadow .2s ease}
+.skl .task:hover{transform:translateY(-3px)}
+.skl .task .case-go{margin-top:auto;padding-top:14px}
+/* 招募页：两步留资 */
+.pr-step{font-size:12px;letter-spacing:.08em;color:var(--ink-3);margin:22px 0 10px}
+.qrbox .pr-step{margin-top:0}
+.qr-wait{display:flex;flex-direction:column;justify-content:center;min-height:240px;border:1px dashed var(--line-2);background:transparent;box-shadow:none}
+@media (max-width:1080px){.skl{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:760px){.skl{grid-template-columns:1fr}}
