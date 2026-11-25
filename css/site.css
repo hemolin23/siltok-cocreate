@@ -887,3 +887,22 @@ details[open] .plus::after{transform:rotate(0)}
 /* 招募页结果：右栏两个码（第 1 步大群、第 2 步企业微信）；手机上码排在最前 */
 .pr-qrs{display:grid;gap:24px}
 @media (max-width:1080px){.pr-qrs{order:-1}}
+/* 社区三页（共创者计划 / 活动 / 经验分享）：首屏海报、分享者席位 */
+.poster{margin:0;justify-self:center;width:100%;max-width:420px}
+.poster img{display:block;width:100%;height:auto;border-radius:var(--r);box-shadow:var(--shadow-lg);background:var(--soft)}
+.poster figcaption{margin-top:12px;text-align:center}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.slot{padding:26px;border-radius:var(--r);border:1px dashed var(--line-2);text-align:center;color:var(--ink-3)}
+.slot b{display:block;color:var(--ink);font-size:20px;margin:10px 0 4px}
+@media (max-width:760px){.slots{grid-template-columns:1fr}}
+/* 全套海报（/creators、/events 页尾） */
+.pset{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px;align-items:start}
+.pset-i{display:block;color:inherit;text-decoration:none}
+.pset-i img{display:block;width:100%;height:auto;border-radius:12px;background:var(--soft);box-shadow:0 8px 26px rgba(16,24,40,.08);transition:transform .25s ease,box-shadow .25s ease}
+.pset-i:hover img{transform:translateY(-4px);box-shadow:0 14px 34px rgba(16,24,40,.14)}
+.pset-i span{display:block;margin-top:10px}
+#posters .cta-row{margin-top:32px}
+@media (max-width:900px){.pset{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:600px){.pset{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}
+/* 高海报（分享页 1080x2040）在首屏限高 */
+.poster img{width:auto;max-width:100%;max-height:760px;margin:0 auto}
