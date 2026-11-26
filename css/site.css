@@ -878,6 +878,8 @@ details[open] .plus::after{transform:rotate(0)}
 .skl .task{display:flex;flex-direction:column;color:inherit;text-decoration:none;transition:transform .2s ease,box-shadow .2s ease}
 .skl .task:hover{transform:translateY(-3px)}
 .skl .task .case-go{margin-top:auto;padding-top:14px}
+/* 首页技能地图：技能图鉴嵌入（图鉴样式在 /skills/gallery.css，都挂在 .sg 下）。这里只去掉图鉴自带的底色，跟随灰色分区 */
+.sg.skl-atlas{background:none;margin-bottom:44px}
 /* 招募页：两步留资 */
 .pr-step{font-size:12px;letter-spacing:.08em;color:var(--ink-3);margin:22px 0 10px}
 .qrbox .pr-step{margin-top:0}
